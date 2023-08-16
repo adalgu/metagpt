@@ -35,7 +35,7 @@ class RateLimiter:
         self.rpm = rpm
 
     def split_batches(self, batch):
-        return [batch[i : i + self.rpm] for i in range(0, len(batch), self.rpm)]
+        return [batch[i: i + self.rpm] for i in range(0, len(batch), self.rpm)]
 
     async def wait_if_needed(self, num_requests):
         current_time = time.time()
@@ -76,7 +76,8 @@ class CostManager(metaclass=Singleton):
         """
         self.total_prompt_tokens += prompt_tokens
         self.total_completion_tokens += completion_tokens
-        cost = (prompt_tokens * TOKEN_COSTS[model]["prompt"] + completion_tokens * TOKEN_COSTS[model]["completion"]) / 1000
+        cost = (prompt_tokens * TOKEN_COSTS[model]["prompt"] +
+                completion_tokens * TOKEN_COSTS[model]["completion"]) / 1000
         self.total_cost += cost
         logger.info(
             f"Total running cost: ${self.total_cost:.3f} | Max budget: ${CONFIG.max_budget:.3f} | "
@@ -117,7 +118,8 @@ class CostManager(metaclass=Singleton):
 
 
 def log_and_reraise(retry_state):
-    logger.error(f"Retry attempts exhausted. Last exception: {retry_state.outcome.exception()}")
+    logger.error(
+        f"Retry attempts exhausted. Last exception: {retry_state.outcome.exception()}")
     logger.warning("""
 Recommend going to https://deepwisdom.feishu.cn/wiki/MsGnwQBjiif9c3koSJNcYaoSnu4#part-XdatdVlhEojeAfxaaEZcMV3ZniQ
 See FAQ 5.8
@@ -147,8 +149,17 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             openai.api_version = config.openai_api_version
         self.rpm = int(config.get("RPM", 10))
 
-    async def _achat_completion_stream(self, messages: list[dict]) -> str:
-        response = await openai.ChatCompletion.acreate(**self._cons_kwargs(messages), stream=True)
+    async def _achat_completion_stream(self, messages: list[dict], max_retries: int = 5) -> str:
+        for i in range(max_retries):
+            try:
+                response = await openai.ChatCompletion.acreate(**self._cons_kwargs(messages), stream=True)
+                break
+            except openai.error.RateLimitError as e:
+                wait_seconds = 0.006  # min wait time given by OpenAI
+                # retry with exponential backoff
+                time.sleep(wait_seconds * math.pow(2, i))
+        else:
+            raise e
 
         # create variables to collect the stream of chunks
         collected_chunks = []
@@ -162,7 +173,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 print(chunk_message["content"], end="")
         print()
 
-        full_reply_content = "".join([m.get("content", "") for m in collected_messages])
+        full_reply_content = "".join(
+            [m.get("content", "") for m in collected_messages])
         usage = self._calc_usage(messages, full_reply_content)
         self._update_costs(usage)
         return full_reply_content
@@ -262,7 +274,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         if CONFIG.update_costs:
             prompt_tokens = int(usage['prompt_tokens'])
             completion_tokens = int(usage['completion_tokens'])
-            self._cost_manager.update_cost(prompt_tokens, completion_tokens, self.model)
+            self._cost_manager.update_cost(
+                prompt_tokens, completion_tokens, self.model)
 
     def get_costs(self) -> Costs:
         return self._cost_manager.get_costs()
